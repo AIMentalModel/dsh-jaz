@@ -43,7 +43,9 @@ The language primitive \`invoke(inputs, opts?)\` is available as a global. Its i
 
 Everything visible is a variable: \`__inputs__\` (this call's \`inputs\` argument), \`__history__\` (array of every invoke record so far: seq, inputs, output, ms, childId — filter it, slice it, pass it into later invokes), and \`__scope__\` (mutable object whose snapshot is merged into every subsequent invoke's inputs — dynamic scoping).
 
-Persistence: pass \`session\` to make cells share one REPL. Variables assigned WITHOUT a declaration (\`facts = [...]\`) or via \`globalThis.x = ...\` persist across cells of the same session; \`let\`/\`const\`/\`var\` are cell-local. \`__history__\`, \`__scope__\`, and the invoke budget also persist per session. Use \`reset: true\` to restart a session.
+Persistence: pass \`session\` to make cells share one REPL. Variables assigned WITHOUT a declaration (\`facts = [...]\`) or via \`globalThis.x = ...\` persist across cells of the same session; \`let\`/\`const\`/\`var\` are cell-local. \`__history__\`, \`__scope__\`, and the invoke budget also persist per session. Use \`reset: true\` to restart a session. Only LOSSLESS JSON DATA persists: a module namespace, class instance, Map/Set, Date, or function is skipped and listed in the result (never silently hollowed by a JSON round trip), and a cell whose return value is not JSON data fails with the offending path.
+
+Scope of the sandbox: the cell runs in a confined Node process, so it is not a substitute for the dedicated file tools — use \`read\`/\`glob\`/\`grep\`/\`bash\` for repository or file inspection, and reach for \`jaz\` when you want generated code with LLM-implemented \`invoke\` calls.
 
 Constraints: every invoke spawns an LLM subagent (slow, costs tokens) and a total-invoke budget applies per session; an over-budget or over-depth call raises \`JazInvokeError\`, which you may catch to degrade gracefully. Keep return values and persisted variables JSON-serializable. Do NOT use this tool for deterministic fan-out over many homogeneous items — use the workflow tool for that. Use jaz when the work needs LLM-decided recursive delegation, long-horizon memory carried as plain variables, or self-improving loops.`;
 
@@ -215,6 +217,23 @@ export function apply(ctx, config) {
       store.env = isPlainRecord(value.env) ? value.env : {};
       if (Array.isArray(value.history)) store.history = value.history;
       if (isPlainRecord(value.scope)) store.scope = value.scope;
+      const skipped = Array.isArray(value.skippedVars) ? value.skippedVars : [];
+
+      if (typeof value.resultIssue === 'string' && value.resultIssue) {
+        // The cell ran; only its return value cannot cross the JSON boundary.
+        // State is persisted (the work happened) and the failure is reported
+        // with the offending path instead of PTC's bare `invalid-output`.
+        return {
+          kind: 'error',
+          result: null,
+          logs: Array.isArray(run.logs) ? run.logs : [],
+          trace,
+          invokesThisRun: trace.length,
+          skippedVars: skipped,
+          ...(sessionName ? { session: value.session ?? sessionInfo(sessionName, store) } : {}),
+          error: `the cell's return value is not lossless JSON — ${value.resultIssue}. Return plain JSON data only (strings, numbers, booleans, null, arrays, plain objects); convert class instances, Map/Set, Date, functions, and undefined first.`,
+        };
+      }
 
       return {
         kind: 'ok',
@@ -222,7 +241,7 @@ export function apply(ctx, config) {
         logs: Array.isArray(run.logs) ? run.logs : [],
         trace,
         invokesThisRun: trace.length,
-        skippedVars: Array.isArray(value.skippedVars) ? value.skippedVars : [],
+        skippedVars: skipped,
         ...(sessionName ? { session: sessionInfo(sessionName, store) } : {}),
       };
     },
@@ -298,7 +317,43 @@ globalThis.invoke = invoke;
 // ---- your cell ----
 const __jazCell = new (Object.getPrototypeOf(async function () {}).constructor)(${JSON.stringify(cell)});
 const __jazValue = await __jazCell();
-// ---- jaz postlude: harvest persisted globals ----
+// ---- jaz postlude: validate the return value, then harvest persisted globals ----
+// A value may cross the PTC boundary (as the result OR as a persisted variable)
+// only when it is LOSSLESS JSON DATA. Anything else is skipped WITH A REASON:
+// a JSON round trip would either make the whole completion value invalid (the
+// run fails as "invalid-output") or silently hollow the value into a plain
+// object whose methods are gone — both are worse than a named skip.
+const __jazWhy = (value, path) => {
+  const seen = new Set();
+  const walk = (v, p) => {
+    if (v === null) return null;
+    const t = typeof v;
+    if (t === 'boolean' || t === 'string') return null;
+    if (t === 'number') return (Number.isFinite(v) && !Object.is(v, -0)) ? null : p + ': non-finite or negative-zero number';
+    if (t !== 'object') return p + ': ' + t + ' is not JSON data';
+    if (seen.has(v)) return p + ': circular reference';
+    seen.add(v);
+    try {
+      if (Array.isArray(v)) {
+        const own = Reflect.ownKeys(v).length;
+        if (own !== v.length + 1) return p + ': sparse or decorated array is not JSON data';
+        for (const key of Object.keys(v)) {
+          const index = Number(key);
+          if (!Number.isInteger(index) || index < 0 || index >= v.length) return p + '.' + key + ': non-index array property is not JSON data';
+        }
+        for (let i = 0; i < v.length; i += 1) { const r = walk(v[i], p + '[' + i + ']'); if (r) return r; }
+      } else {
+        const proto = Object.getPrototypeOf(v);
+        if (!(proto === null || Object.getPrototypeOf(proto) === null)) return p + ': only plain objects and arrays are JSON data (this is a class instance or module namespace)';
+        for (const key of Object.keys(v)) { const r = walk(v[key], p + '.' + key); if (r) return r; }
+      }
+      if (Object.getOwnPropertySymbols(v).length > 0) return p + ': symbol-keyed properties are not JSON data';
+      return null;
+    } finally { seen.delete(v); }
+  };
+  return walk(value, path || 'value');
+};
+const __jazResultReason = __jazWhy(__jazValue, 'return value');
 const __env = {};
 const __skipped = [];
 for (const key of Reflect.ownKeys(globalThis)) {
@@ -306,10 +361,18 @@ for (const key of Reflect.ownKeys(globalThis)) {
   if (__jazBaseline.has(key)) continue;
   if (key === 'invoke' || key === '__inputs__' || key === '__history__' || key === '__scope__') continue;
   if (key.startsWith('__jaz')) continue;
-  try { __env[key] = JSON.parse(JSON.stringify(globalThis[key])); }
-  catch { __skipped.push(key); }
+  const reason = __jazWhy(globalThis[key], key);
+  if (reason) { __skipped.push(reason); continue; }
+  __env[key] = JSON.parse(JSON.stringify(globalThis[key]));
 }
-return { result: __jazValue === undefined ? null : __jazValue, env: __env, history: __history__, scope: __scope__, skippedVars: __skipped };`;
+return {
+  result: __jazResultReason ? null : (__jazValue === undefined ? null : __jazValue),
+  resultIssue: __jazResultReason,
+  env: __env,
+  history: __history__,
+  scope: __scope__,
+  skippedVars: __skipped,
+};`;
 }
 
 /* ---------------------------- host helpers ---------------------------- */
@@ -404,7 +467,7 @@ function renderResult(args, value) {
   lines.push('## Result', '```json', capText(safeJson(value.result), 8000), '```', '');
   if (Array.isArray(value.trace) && value.trace.length > 0) {
     lines.push('## invoke trace', '', '| # | ms | stopReason | child | input chars | out |', '| --- | --- | --- | --- | --- | --- |');
-    for (const t of value.trace) {
+    for (const t of [...value.trace].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) {
       lines.push(`| ${t.seq} | ${t.ms} | ${t.stopReason ?? ''} | ${shortId(t.childId)} | ${t.inputChars ?? ''} | ${t.outputKind ?? ''} |`);
     }
     lines.push('');
@@ -413,7 +476,8 @@ function renderResult(args, value) {
     lines.push(`## REPL session "${value.session.name}"`, `vars: ${value.session.vars.length ? value.session.vars.join(', ') : '(none)'} · history: ${value.session.historyLength} entries · invokes total: ${value.session.invokesTotal}`, '');
   }
   if (Array.isArray(value.skippedVars) && value.skippedVars.length > 0) {
-    lines.push(`skipped (not JSON-serializable): ${value.skippedVars.join(', ')}`, '');
+    lines.push('## not persisted (not lossless JSON data)', ...value.skippedVars.map((entry) => `- ${entry}`), '');
+    lines.push('These variables will NOT exist in the next cell of this session. Re-create them inside the cell that needs them (e.g. `const fs = await import(\'node:fs\')` in that same cell); only plain JSON data survives across cells.', '');
   }
   if (Array.isArray(value.logs) && value.logs.length > 0) {
     const tail = value.logs.slice(-5).join('\n');

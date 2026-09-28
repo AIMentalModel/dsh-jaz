@@ -54,7 +54,51 @@ node test-mock.mjs
 
 > 问题 3–5 的修复已写入代码；由于"替换已安装 bundle 需要重启才能加载新的 JS 模块生成"（`application: restart-required`），需重启 Harness 后在 `jaz_mode status` 中确认。
 
-## 4. 已知边界（非缺陷）
+## 4. 真实用户会话复现（《寻找 dsh 工作区相关插件》）与根因修复
+
+用户在一个普通会话里让 agent 用 `jaz` 做 DSH 仓库侦察，连撞三次报错。原始证据（会话 `session-406cbc25`，事件 `tool/result`）：
+
+| # | 报错原文 | 触发点 |
+|---|---|---|
+| 1 | `invalid-output: program completion must be lossless JSON` | cell 执行了 `globalThis.__fs = fs`（`fs` 是 `node:fs` 模块命名空间） |
+| 2 | （同一会话后续）`exception: TypeError: fs.readdirSync is not a function` | 下一格读 `globalThis.fs`，拿到的是被 JSON 往返**掏空**的普通对象 |
+| 3 | `invalid-output`（无定位信息） | 任何非无损 JSON 的完成值 |
+
+**根因（本插件的 bug）**：postlude 的"环境收割"把**任意** `globalThis` 新增变量用 `JSON.parse(JSON.stringify(v))` 持久化——
+
+- 遇到模块命名空间/类实例这类非 JSON 值时，错误进入 `__env`，使整个完成值被 PTC 拒绝 → 报错 1；
+- 侥幸能 `JSON.stringify` 的值（函数被丢掉）被静默存成普通对象 → 下一格 `fs.readdirSync is not a function`（报错 2）；
+- 返回值本身不合法时只有 PTC 的裸 `invalid-output`，没有路径信息（报错 3）。
+
+**修复**
+
+1. guest 侧新增 `__jazWhy(value, path)`：按 PTC 同一套规则（普通对象/稠密数组/有限数/circular/symbol/class 实例）判定"无损 JSON 数据"；**不是就跳过并记录带路径与原因的理由**，绝不再做会掏空值的 JSON 往返。
+2. 返回值单独判定：不合法时返回 `resultIssue`，宿主渲染成可操作错误（含出错路径与修复建议），而不是 `invalid-output`。
+3. 结果渲染新增 `## not persisted` 段落，明确"这些变量在下一格不存在，请在需要它的那一格里重新创建"。
+4. 工具描述补充：只有无损 JSON 数据会跨格；沙箱内的文件侦察应改用 `read`/`glob`/`grep`/`bash`。
+
+**修复前后的实测对比**（在独立镜像 profile 上逐条重放原场景：`dsh --profile jazcheck web` 换端口 3099 + 临时 profile，完全不触碰正在使用的 GUI profile）：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| A. `globalThis.__fs = fs`（模块命名空间） | 整轮失败 `invalid-output`，`result=null` | ✅ 成功返回结果；`## not persisted` 列出 `__fs.Dir: function is not JSON data`，`__root` 正常持久 |
+| B. 下一格读 `__fs` | 掏空成对象 → `fs.readdirSync is not a function` | ✅ `typeof __fs === 'undefined'`（诚实），并附"未持久化"说明 |
+| C. 返回 `{ when: new Date() }` | 裸 `invalid-output` | ✅ `the cell's return value is not lossless JSON — return value.when: only plain objects and arrays are JSON data (this is a class instance or module namespace)` |
+| D. 纯 JSON 变量跨格 | 正常 | ✅ 仍正常（回归） |
+
+## 5. JAZ preset 的真实链路验证
+
+用独立镜像 profile（`dsh-base` + `dsh-web-app` + 两个 @local bundle，webserver 换到 3099）走 GUI 同一条会话命令路径：
+
+| 检查 | 结果 |
+|---|---|
+| `agentPresets.list()` | `jaz` 出现在名册，**无 `broken` 诊断**（`standard/ptc/minimal/cordis/jaz`） |
+| `sessionController.create({agentPreset:'jaz'})` | ✅ 返回 `{sessionId, agentPreset:"jaz"}` |
+| 该会话可见工具（`ctx.tools.schemas(agent)`） | ✅ **恰好只有 `jaz`** —— shell/文件/网络/委派/compaction 全部不在 |
+| 驱动一轮真实对话（DeepSeek） | ✅ 模型调用 `jaz`，cell 返回 42；`turn/end reason=completed` |
+| cell 内 `invoke`（论文核心原语） | ✅ 2 次并行 invoke 均 `completed`（42 / 19），trace 正常 |
+
+## 6. 已知边界（非缺陷）
 
 - REPL 会话状态驻留插件内存，重启即清空（论文的"记忆即状态"不引入外部存储）；
 - JAZ 模式下 agent 无法调用 `write`/`bash` 等 —— 这是论文"无外部系统"的刻意设定，需要时用 `allow` 放行；

@@ -14,7 +14,7 @@
         id: jaz
         name: JAZ
         description: 论文最小 harness — 只有 invoke REPL（invoke + 持久变量），无 shell/文件/网络工具
-        order: 4
+        order: 5
         plugins:
           - id: persona
             name: '@deepseek-ai/dsh-persona'
