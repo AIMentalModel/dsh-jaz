@@ -8,34 +8,53 @@
 | 包 | 提供 | 说明 |
 |---|---|---|
 | [`./`](./index.js) · `@local/dsh-jaz-invoke` | `jaz` 工具 + `invoke` 原语 + 持久 REPL | 论文的核心原语与 REPL（[完整手册](#1-一句话理解)见下） |
-| [`packages/dsh-jaz-mode/`](./packages/dsh-jaz-mode) · `@local/dsh-jaz-mode` | `jaz_agent`、`jaz_mode`、部署默认 JAZ 模式 | 论文的"最小 harness"：把 agent 收窄成只剩 invoke REPL |
+| [`packages/dsh-jaz-mode/`](./packages/dsh-jaz-mode) · `@local/dsh-jaz-mode` | `jaz_agent`、`jaz_mode`、部署默认 JAZ 模式 | 运行时把 agent 收窄成只剩 invoke REPL |
+| [`packages/dsh-jaz-preset/`](./packages/dsh-jaz-preset) · `@local/dsh-jaz-preset` | **JAZ agent preset**（新会话可选） | 论文最简 harness 作为一个 preset：会话里只有 `jaz` |
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/AIMentalModel/dsh-jaz.git ~/Code/dsh-plugins/dsh-jaz
 
-# 两个 bundle 都装上（幂等；profile 级生效；target 需绝对路径）
-plugin_manager install_bundle  target=$HOME/Code/dsh-plugins/dsh-jaz
-plugin_manager install_bundle  target=$HOME/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-mode
+# 1) 装包：dsh plugin 只代理 pnpm（<profile> 换成你的 profile，如 web）
+dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz
+dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-mode
+dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-preset
+
+# 2) 启用 bundle：这一步由 Plugin Manager 负责（它写 profile 的 dsh.profile.bundles）
+#    · Web UI：设置 → 插件 → 启用对应 bundle
+#    · 或让 Agent 调用 plugin_manager 工具（action: install_bundle / set_bundle）
 ```
 
-需要 `ctx.ptcRuntime`（`@deepseek-ai/dsh-ptc-runtime-node`）与 `ctx.subagents`（`dsh-subagent-spawn-in-process`），DSH 默认 profile 已具备。
-包名保留 `@local/` 前缀是刻意的：它们作为本机 profile bundle 安装，不发布到 npm。
+> **注意别混淆两个东西**：`dsh plugin` 是**你在终端敲的** CLI 命令（只装包）；`plugin_manager` 是 **Agent 工具**（负责 bundle 选择与启用）。前者不会自动选中 bundle，所以第 2 步不能省。
+>
+> 依赖：`ctx.ptcRuntime`（`@deepseek-ai/dsh-ptc-runtime-node`）与 `ctx.subagents`（`dsh-subagent-spawn-in-process`），DSH 默认 profile 已具备。包名保留 `@local/` 前缀是刻意的：它们作为本机 profile bundle 安装，不发布到 npm。
 
-## JAZ 模式（`@local/dsh-jaz-mode`）
 
-论文的 harness 只有一条 `invoke` 原语——没有工具列表、没有文件系统、没有记忆系统。本插件把它做成**可运行时开关、按 agent 作用域、可逆**的模式：
+## JAZ 模式（三种入口）
 
-### 方式 A：让一个子代理跑 JAZ 模式（零风险，推荐先试）
+论文的 harness 只有一条 `invoke` 原语——没有工具列表、没有文件系统、没有记忆系统。本仓库提供三种入口，从"最省事"到"最细粒度"：
+
+### 方式 A：JAZ preset —— 新会话直接就是 JAZ 模式（最直观）
+
+安装 `@local/dsh-jaz-preset` 后，**新建会话时在 preset 选择器里选 `JAZ`**。该 preset 只挂两样东西：
+
+- `@deepseek-ai/dsh-persona`：JAZ 协议（写 cell、用 `invoke`、状态存变量、历史够长就尾递归委托）；
+- `@local/dsh-jaz-invoke`：`jaz` 工具本身。
+
+所以这个会话里**没有** shell、文件系统、网络、委派、compaction 等工具——正是论文"prompt-only，无外部系统"的设定。会话状态（变量 / `__history__` / `__scope__`）由 `session` 持久在插件内存里。
+
+> preset 是**新会话**才生效的：已存在的会话保持它启动时的插件集（DSH 的规则），改动后请开新会话验证。装完新 bundle 后如果选择器里没看到 `JAZ`，刷新一次页面。
+
+### 方式 B：让一个子代理跑 JAZ 模式（当前会话里按需用）
 
 ```
 jaz_agent({ task: "把这三篇材料的要点整理成对比表", session: "compare-1" })
 ```
 
-子代理的工具表被 `toolFilter` 收窄到**只有 `jaz`**，系统提示装入 JAZ 协议（写 cell、用 `invoke`、状态存变量、历史够长就尾递归委托）。它除了写 cell 什么也做不了——这正是论文的"最小 harness"。结果以文本返回，并在 DSH 会话轨迹里生成子代理记录。
+子代理的工具表被 `toolFilter` 收窄到**只有 `jaz`**，系统提示装入同一套 JAZ 协议。它除了写 cell 什么也做不了。结果以文本返回，并在 DSH 会话轨迹里生成子代理记录。
 
-### 方式 B：把当前会话切成 JAZ 模式（运行时、可逆）
+### 方式 C：把当前会话切成 JAZ 模式（运行时、可逆）
 
 ```
 jaz_mode({ action: "enter" })            # 隐藏除 jaz / jaz_mode 之外的全部工具，并装入 JAZ 协议提示
@@ -46,7 +65,7 @@ jaz_mode({ action: "status" })           # 查看当前状态
 
 收窄是**该 agent 作用域**的（`agent.ctx`），不影响其他会话；下一个模型步生效，退出后恢复。实测：进入后 `read`/`write`/`bash`/`web_search`/`subagent` 全部消失、技能目录清空，退出后全部恢复。
 
-### 方式 C：把 JAZ 模式设为部署默认
+### 方式 D：部署默认（所有会话）
 
 ```yaml
 - insert:
