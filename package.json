@@ -1,0 +1,22 @@
+{
+  "name": "@local/dsh-jaz-invoke",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JAZ-style invoke primitive for DSH: LLM-implemented recursive calls inside a persistent code REPL (arXiv:2609.26891).",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

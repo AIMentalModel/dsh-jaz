@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-jaz-mode
+      name: '@local/dsh-jaz-mode'
+      config: {}

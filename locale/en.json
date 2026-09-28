@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "JAZ invoke",
+    "description": "LLM-implemented recursive invoke primitive with a persistent code REPL (arXiv:2609.26891)."
+  }
+}

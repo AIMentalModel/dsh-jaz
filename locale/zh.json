@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "JAZ invoke",
+    "description": "JAZ 风格 invoke 原语：LLM 在运行时提供函数实现的递归调用 + 持久代码 REPL（arXiv:2609.26891）。"
+  }
+}

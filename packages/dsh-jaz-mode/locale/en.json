@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "JAZ mode",
+    "description": "Collapse an agent to the invoke REPL (arXiv:2609.26891), plus a JAZ-mode child agent."
+  }
+}
