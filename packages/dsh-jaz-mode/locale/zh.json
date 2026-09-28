@@ -1,6 +1,0 @@
-{
-  "meta": {
-    "title": "JAZ mode",
-    "description": "把 agent 收窄成 invoke REPL（arXiv:2609.26891），并提供 JAZ 模式子代理。"
-  }
-}

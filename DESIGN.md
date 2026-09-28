@@ -155,12 +155,14 @@ Trace 还通过既有 `subagent/start`/`subagent/end` 事件天然进入 DSH 会
 ## 8. 文件布局（实现位置）
 
 ```
-~/Code/dsh-plugins/dsh-jaz-invoke/
+~/Code/dsh-plugins/dsh-jaz-invoke/          # 一个可安装 bundle，两个入口 + 两个预设
 ├── DESIGN.md            # 本文件
-├── package.json         # @local/dsh-jaz-invoke, dsh.bundle.patch
-├── cordis.patch.yml     # insert 插件行
-├── index.js             # apply(ctx, config)：注册 jaz 工具
+├── package.json         # exports: "." → index.js, "./mode" → mode.js
+├── cordis.patch.yml     # insert: 核心行 + 模式行 + preset-jaz / preset-jaz-minimal
+├── index.js             # 核心：jaz 工具、invoke 原语、session store、hooks
+├── mode.js              # 模式：jaz_mode / jaz_agent / restriction 挂载（同包第二入口）
 ├── test-mock.mjs        # mock 双缝的端到端回归测试（node test-mock.mjs）
+├── docs/VERIFICATION.md # 实测记录（含用户会话复现与失败尝试）
 ├── locale/en.json, locale/zh.json
 └── icon.svg
 ```
@@ -176,7 +178,7 @@ Trace 还通过既有 `subagent/start`/`subagent/end` 事件天然进入 DSH 会
 
 另注意：**替换已安装 bundle 的代码需要重启 Harness 才能加载新 JS 模块**（`application: restart-required`），新装 bundle 才能 HMR 即时生效——迭代开发时请预留重启。
 
-## 10. JAZ 模式（第二个 bundle：`packages/dsh-jaz-mode`）
+## 10. JAZ 模式（同包第二入口：`mode.js` → `@local/dsh-jaz-invoke/mode`）
 
 论文的 harness 本体只有一条 `invoke` 原语——没有工具表、没有文件系统、没有记忆系统。把这层"最小 harness"做成 DSH 里可开关的**模式**，需要能对 agent 隐藏工具，这由 `dsh-tools` 提供两个扩展点：
 

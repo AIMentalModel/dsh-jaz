@@ -1,6 +1,11 @@
 /**
- * dsh-jaz-mode — JAZ mode for the DeepSeek Harness, after arXiv:2609.26891
- * "Harness as a Language".
+ * JAZ mode entry point of the `@local/dsh-jaz-invoke` package (arXiv:2609.26891).
+ *
+ * Shipped as a second entry of the SAME package (row name
+ * `@local/dsh-jaz-invoke/mode`) so the repo carries one installable entity:
+ * the core module (index.js) owns the `jaz` tool / `invoke` primitive, and this
+ * module owns JAZ MODE — the runtime `jaz_mode`/`jaz_agent` tools and the
+ * scoped tool restriction a preset mounts to collapse an agent's surface.
  *
  * A "mode" here is not a new tool: it collapses an agent's surface to the
  * invoke REPL, exactly like the paper's minimal harness. Two ways in:
@@ -42,6 +47,8 @@ const DEFAULTS = {
   registerTools: true,
   /** Install the JAZ protocol prompt section (false when a preset persona already carries it). */
   promptSection: true,
+  /** Shorthand for `registerTools: false, promptSection: false` — a preset's restriction-only mount. */
+  restrictionOnly: false,
 };
 
 /** Shared protocol text: registered as a prompt section (JAZ mode) or a child persona. */
@@ -337,8 +344,8 @@ function readConfig(config) {
     mode: raw.mode === 'jaz' ? 'jaz' : 'native',
     allowTools: Array.isArray(raw.allowTools) ? raw.allowTools.filter((n) => typeof n === 'string' && n) : [],
     model: typeof raw.model === 'string' && raw.model ? raw.model : undefined,
-    registerTools: raw.registerTools === undefined ? DEFAULTS.registerTools : raw.registerTools !== false,
-    promptSection: raw.promptSection === undefined ? DEFAULTS.promptSection : raw.promptSection !== false,
+    registerTools: raw.restrictionOnly === true ? false : (raw.registerTools === undefined ? DEFAULTS.registerTools : raw.registerTools !== false),
+    promptSection: raw.restrictionOnly === true ? false : (raw.promptSection === undefined ? DEFAULTS.promptSection : raw.promptSection !== false),
   };
 }
 

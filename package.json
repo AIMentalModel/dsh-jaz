@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "JAZ-style invoke primitive for DSH: LLM-implemented recursive calls inside a persistent code REPL (arXiv:2609.26891).",
+  "description": "JAZ for DeepSeek Harness (arXiv:2609.26891): the invoke primitive with a persistent code REPL, JAZ mode, and two presets — one installable bundle.",
   "exports": {
     ".": "./index.js",
     "./package.json": "./package.json",
-    "./locale/*.json": "./locale/*.json"
+    "./locale/*.json": "./locale/*.json",
+    "./mode": "./mode.js"
   },
   "files": [
+    "index.js",
+    "mode.js",
     "locale/*.json",
     "icon.svg"
   ],

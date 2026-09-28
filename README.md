@@ -5,11 +5,15 @@
 
 本仓库包含两个 Harness bundle：
 
-| 包 | 提供 | 说明 |
+**一个可安装实体**（`@local/dsh-jaz-invoke`），内含两个入口 + 两个预设：
+
+| 组成 | 位置 | 提供 |
 |---|---|---|
-| [`./`](./index.js) · `@local/dsh-jaz-invoke` | `jaz` 工具 + `invoke` 原语 + 持久 REPL | 论文的核心原语与 REPL（[完整手册](#1-一句话理解)见下） |
-| [`packages/dsh-jaz-mode/`](./packages/dsh-jaz-mode) · `@local/dsh-jaz-mode` | `jaz_agent`、`jaz_mode`、部署默认 JAZ 模式 | 运行时把 agent 收窄成只剩 invoke REPL |
-| [`packages/dsh-jaz-preset/`](./packages/dsh-jaz-preset) · `@local/dsh-jaz-preset` | **JAZ agent preset**（新会话可选） | 论文最简 harness 作为一个 preset：会话里只有 `jaz` |
+| 核心 | [`index.js`](./index.js) | `jaz` 工具 + `invoke` 原语 + 持久 REPL + hooks（预算/深度/trace） |
+| 模式 | [`mode.js`](./mode.js)（入口 `@local/dsh-jaz-invoke/mode`） | `jaz_agent`（JAZ 子代理）、`jaz_mode`（运行时切入/退出）、部署默认 JAZ 模式、以及 preset 用的 restriction 挂载 |
+| 预设 | [`cordis.patch.yml`](./cordis.patch.yml) | 新会话可选的两个模式：`JAZ`（JAZ 风格 + base 工具）、`JAZ (minimal)`（论文设定） |
+
+> 为什么是一个包：核心与模式共享同一套配置与守卫，preset 只是声明；拆成三个包只会多两次安装、多两次"改代码要重启"的重载。`mode` 采用**同包第二入口**，代码仍是分模块的。
 
 ## 快速开始
 
@@ -18,8 +22,6 @@ git clone https://github.com/AIMentalModel/dsh-jaz.git ~/Code/dsh-plugins/dsh-ja
 
 # 1) 装包：dsh plugin 只代理 pnpm（<profile> 换成你的 profile，如 web）
 dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz
-dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-mode
-dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-preset
 
 # 2) 启用 bundle：这一步由 Plugin Manager 负责（它写 profile 的 dsh.profile.bundles）
 #    · Web UI：设置 → 插件 → 启用对应 bundle
@@ -37,7 +39,7 @@ dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-preset
 
 ### 方式 A：JAZ preset —— 新会话直接就是 JAZ 风格（两种口味）
 
-安装 `@local/dsh-jaz-preset` 后，**新建会话时在 preset 选择器里二选一**：
+安装本 bundle 后，**新建会话时在 preset 选择器里二选一**：
 
 | preset | 内容 | 什么时候用 |
 |---|---|---|
@@ -48,7 +50,7 @@ preset 的工具行是**从 shipped `standard` 预设原样复制的**（连必�
 
 > preset 是**新会话**才生效的：已存在的会话保持它启动时的插件集（DSH 的规则）。装完/改完新 bundle 后请开新会话验证；选择器里没看到就刷新一次页面。
 >
-> `JAZ (minimal)` 的诚实说明：restriction 通过 `@local/dsh-jaz-mode`（`registerTools: false`）挂载，能滤掉**继承层**工具（含 host 级 `jaz_mode`/`jaz_agent`），但 DSH 注册表**不过滤本层注册**——像 `dsh-experimental-agent-team-profile` 那样直接往每个 agent 注入工具的 bundle 仍会残留 `spawn_teammate`/`team_task_*`。实测见 [docs/VERIFICATION.md](./docs/VERIFICATION.md) §6。
+> `JAZ (minimal)` 的诚实说明：restriction 通过 `@local/dsh-jaz-invoke/mode`（`restrictionOnly: true`）挂载，能滤掉**继承层**工具（含 host 级 `jaz_mode`/`jaz_agent`），但 DSH 注册表**不过滤本层注册**——像 `dsh-experimental-agent-team-profile` 那样直接往每个 agent 注入工具的 bundle 仍会残留 `spawn_teammate`/`team_task_*`。实测见 [docs/VERIFICATION.md](./docs/VERIFICATION.md) §6。
 
 ### 方式 B：让一个子代理跑 JAZ 模式（当前会话里按需用）
 
@@ -73,8 +75,8 @@ jaz_mode({ action: "status" })           # 查看当前状态
 
 ```yaml
 - insert:
-    - id: dsh-jaz-mode
-      name: '@local/dsh-jaz-mode'
+    - id: jaz-mode
+      name: '@local/dsh-jaz-invoke/mode'
       config:
         mode: jaz            # 部署级收窄（对齐论文的最简 harness）
         allowTools: []       # 例如 ["bash","read"] 保留少量工具

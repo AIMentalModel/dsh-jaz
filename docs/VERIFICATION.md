@@ -151,7 +151,30 @@ jaz-restrict (@local/dsh-jaz-mode): waiting for tools
 | `JAZ (minimal)` 会话工具表 | ✅ `jaz`（+ agent-team 本层注入的 6 个，无法过滤） |
 | `JAZ` 会话真实搜网一轮 | ✅ 调用 `web_search` + `bash`/`curl`（npm registry），产出带版本/下载量/链接的 3 条结果，`turn/end: completed` |
 
-## 8. 已知边界（非缺陷）
+## 8. 收敛为一个安装实体（2026-09-28）
+
+按"如无必要勿增实体"把原来的三个包合并为一个：
+
+| 之前 | 现在 |
+|---|---|
+| `@local/dsh-jaz-invoke`（核心）+ `@local/dsh-jaz-mode`（模式）+ `@local/dsh-jaz-preset`（声明） | **一个包 `@local/dsh-jaz-invoke`**：`index.js`（核心）+ `mode.js`（同包第二入口 `@local/dsh-jaz-invoke/mode`）+ 一份 patch 声明两个预设 |
+
+同时删掉中途出现的 `jaz-web` 变体——`JAZ` 预设已含 `tool-web`，再单开一个变体不增加能力。
+
+**实测（隔离镜像，只装这一个 bundle）**
+
+| 检查 | 结果 |
+|---|---|
+| preset 名册 | `jaz`、`jaz-minimal` 均在，**无 BROKEN** |
+| `jaz` 会话工具表 | 31 个：`jaz` + base 工具（read/write/edit/glob/grep/bash/jobs/web_search/web_fetch/skill/todo/ask_user/present/subagent/workflow）+ `jaz_mode`/`jaz_agent` + agent-team 工具 |
+| `jaz-minimal` 会话工具表 | 10 个：`jaz` + agent-team 本层注入的 6 个（无法过滤） |
+| 核心工具在 `jaz` 预设会话里直接 dispatch | ✅ cell 成功 |
+| profile manifest | 只剩 `@local/dsh-jaz-invoke`（两个旧 bundle 已移除） |
+| 全新进程解析同包子路径 | ✅ `@local/dsh-jaz-invoke/mode` 导入成功 |
+
+**一个必须记住的操作事实**：`install_bundle` 对**已在选择列表里的同名 bundle** 返回 `ambiguous-install`；正确做法是 `remove_bundle` → `install_bundle`。另外给包**新增子路径导出**后，运行中的 host 会报 `failed to import`（模块/`package.json` 解析缓存），**必须重启**才能加载——全新进程无此问题（上表最后一行）。
+
+## 9. 已知边界（非缺陷）
 
 - REPL 会话状态驻留插件内存，重启即清空（论文的"记忆即状态"不引入外部存储）；
 - JAZ 模式下 agent 无法调用 `write`/`bash` 等 —— 这是论文"无外部系统"的刻意设定，需要时用 `allow` 放行；
