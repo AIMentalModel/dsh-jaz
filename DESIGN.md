@@ -175,3 +175,26 @@ Trace 还通过既有 `subagent/start`/`subagent/end` 事件天然进入 DSH 会
 2. **失败 cell 的 invoke 从记忆中消失**（语义缺陷）：cell 抛错时 guest 进程内新追加的 `__history__` 条目随进程丢弃，但 token 已花。修复：宿主侧 journal 记录每次 invoke 的完整输入/输出快照，cell 失败时合并回持久 `__history__` 并标 `cellFailed: true`；预算计数本就累计（符合 BudgetPool 语义）。
 
 另注意：**替换已安装 bundle 的代码需要重启 Harness 才能加载新 JS 模块**（`application: restart-required`），新装 bundle 才能 HMR 即时生效——迭代开发时请预留重启。
+
+## 10. JAZ 模式（第二个 bundle：`packages/dsh-jaz-mode`）
+
+论文的 harness 本体只有一条 `invoke` 原语——没有工具表、没有文件系统、没有记忆系统。把这层"最小 harness"做成 DSH 里可开关的**模式**，需要能对 agent 隐藏工具，这由 `dsh-tools` 提供两个扩展点：
+
+- `ToolRuntime.restrict({ allow, deny })`：过滤**该 scope 继承**的工具（全局层 + 祖先层），返回 disposer；scope 自身的注册不受影响；
+- `ToolRuntime.get/schemas(name?, scope?)`：`ScopeKey` 就是 **agent 对象本身**（shipped 工具的调用点都写 `ctx.tools.get(name, agent)`），不是 session id。
+
+关键设计选择：**把限制注册到 `agent.ctx` 而不是插件根 ctx**（`Agent.ctx` 的文档语义是 "calling through `agent.ctx` scopes EFFECTS"）。于是得到按 agent 作用域、可运行时进入/退出的模式，而不是改全局部署：
+
+| 提供物 | 机制 | 效果 |
+|---|---|---|
+| `jaz_agent({task, session?})` | `ctx.subagents.start(provider, { toolFilter: { allow: ['jaz'] }, persona: JAZ_PROTOCOL })` | 子代理只有 `jaz` 一个工具，只能写 cell 调 `invoke`；`spawn` provider 支持 `toolFilter`/`persona` 能力 |
+| `jaz_mode({action:'enter'\|'exit'\|'status'})` | `exec.agent.ctx.tools.restrict({allow:['jaz','jaz_mode',...]})` + `exec.agent.ctx.systemPrompt.section({...})` | 当前 agent 表面收窄为 invoke REPL，下一步生效；`jaz`/`jaz_mode` 始终保留，故随时可退出 |
+| 部署默认 `mode: 'jaz'` | 插件根 ctx 的 restrict + 全局 prompt section | 对齐论文的最简 harness；需重启生效 |
+
+设计取舍：
+1. **不做成 `dsh-tools` 的第四种 `ToolPresentationMode`**：那需要改 `dsh-tools` 本体（闭合联合类型），插件不该越界；用 `restrict` 达到同等"模型面收窄"效果；
+2. **白名单精确性**：`allow` 里只能放当前 scope 真实存在的工具名，否则 `restrict` 会因未知名字报错——因此用 `ctx.tools.get(name, agent)` 校验，并把未知名字降级为告警而不是失败；
+3. **模式是运行时状态**：不写持久配置，退出/进程重启即回到部署默认；这符合"模式"而非"配置"的语义；
+4. **JAZ 模式下 agent 连 `write`/`bash` 都不可用**——这是论文"无外部系统"的刻意设定，需要落地产物时用 `allow` 放行。
+
+实测记录见 [docs/VERIFICATION.md](./docs/VERIFICATION.md)。
