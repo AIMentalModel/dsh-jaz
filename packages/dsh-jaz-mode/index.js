@@ -34,6 +34,14 @@ const DEFAULTS = {
   allowTools: [],
   /** Model override for JAZ children. */
   model: undefined,
+  /**
+   * Register `jaz_agent`/`jaz_mode`. Set false when this plugin is mounted
+   * ONLY to install the JAZ-mode restriction inside a preset scope: the scope
+   * then exposes its own tools (e.g. `jaz`) and nothing else.
+   */
+  registerTools: true,
+  /** Install the JAZ protocol prompt section (false when a preset persona already carries it). */
+  promptSection: true,
 };
 
 /** Shared protocol text: registered as a prompt section (JAZ mode) or a child persona. */
@@ -80,6 +88,8 @@ const MODE_TOOL_DESCRIPTION = `Enter, leave, or inspect JAZ mode for THIS agent 
 
 On \`enter\`, every other tool is hidden from you and a JAZ protocol prompt section is installed, so from your next step on you work only by writing \`jaz\` cells that call \`invoke\`. \`jaz\` and \`jaz_mode\` stay visible so you can work and later leave. The change is scoped to this agent only and is reversible with \`action: "exit"\`.
 
+Limitation: the harness exempts a scope's OWN registrations from restrictions, so tools another plugin registers directly into this agent's scope (some plugins do, e.g. a team/agent-team bundle) cannot be hidden this way. The result's \`visibleTools\` lists exactly what remains.
+
 Extra tools can be kept with \`allow: ["bash", ...]\` (only names that exist are accepted).`;
 
 export function apply(ctx, config) {
@@ -92,15 +102,17 @@ export function apply(ctx, config) {
   const jazAvailable = () => typeof ctx.tools.get(JAZ_TOOL) === 'function' || Boolean(ctx.tools.get(JAZ_TOOL));
 
   const resolveAllow = (extra, agent) => {
-    const wanted = [JAZ_TOOL, MODE_TOOL, ...cfg.allowTools, ...(Array.isArray(extra) ? extra : [])];
+    // `jaz_mode` is whitelisted only when this mount actually registers it: a
+    // restriction-only mount must not keep a tool it does not provide.
+    const wanted = [JAZ_TOOL, ...(cfg.registerTools ? [MODE_TOOL] : []), ...cfg.allowTools, ...(Array.isArray(extra) ? extra : [])];
     const out = [];
     const unknown = [];
     for (const name of wanted) {
       if (typeof name !== 'string' || !name || out.includes(name)) continue;
-      if (name === JAZ_TOOL || name === MODE_TOOL) { out.push(name); continue; }
       // The agent object IS the viewing scope key for ctx.tools.get/schemas;
       // shipped tools live on the agent plane and are invisible to the global view.
       const seen = agent ? ctx.tools.get(name, agent) : ctx.tools.get(name);
+      // A restriction rejects unknown names, so only real ones may be listed.
       if (seen) out.push(name);
       else unknown.push(name);
     }
@@ -143,7 +155,7 @@ export function apply(ctx, config) {
   };
 
   /* ------------------------------- jaz_mode ------------------------------- */
-  disposers.push(ctx.tools.register({
+  if (cfg.registerTools) disposers.push(ctx.tools.register({
     name: MODE_TOOL,
     description: MODE_TOOL_DESCRIPTION,
     parameters: {
@@ -191,7 +203,7 @@ export function apply(ctx, config) {
   }));
 
   /* ------------------------------- jaz_agent ------------------------------ */
-  disposers.push(ctx.tools.register({
+  if (cfg.registerTools) disposers.push(ctx.tools.register({
     name: AGENT_TOOL,
     description: AGENT_TOOL_DESCRIPTION,
     parameters: {
@@ -268,7 +280,7 @@ export function apply(ctx, config) {
       if (unknown.length > 0) logger.warn?.(`jaz-mode: ignoring unknown allowTools: ${unknown.join(', ')}`);
       try {
         disposers.push(ctx.tools.restrict({ allow }));
-        disposers.push(ctx.systemPrompt.section({ name: 'jaz-mode', order: 850, text: JAZ_PROTOCOL, interpolate: false }));
+        if (cfg.promptSection) disposers.push(ctx.systemPrompt.section({ name: 'jaz-mode', order: 850, text: JAZ_PROTOCOL, interpolate: false }));
         logger.info?.(`jaz-mode: deployment default JAZ mode active (allow: ${allow.join(', ')})`);
       } catch (error) {
         logger.warn?.(`jaz-mode: config mode="jaz" could not be applied: ${errorMessage(error)}`);
@@ -278,7 +290,8 @@ export function apply(ctx, config) {
     }
   }
 
-  logger.info?.(`dsh-jaz-mode: ready (mode=${cfg.mode}, provider=${cfg.provider})`);
+  if (!cfg.registerTools) logger.info?.('dsh-jaz-mode: tool registration disabled (restriction-only mount)');
+  logger.info?.(`dsh-jaz-mode: ready (mode=${cfg.mode}, provider=${cfg.provider}, registerTools=${cfg.registerTools})`);
 
   return () => {
     for (const [agentId, entry] of active) {
@@ -324,6 +337,8 @@ function readConfig(config) {
     mode: raw.mode === 'jaz' ? 'jaz' : 'native',
     allowTools: Array.isArray(raw.allowTools) ? raw.allowTools.filter((n) => typeof n === 'string' && n) : [],
     model: typeof raw.model === 'string' && raw.model ? raw.model : undefined,
+    registerTools: raw.registerTools === undefined ? DEFAULTS.registerTools : raw.registerTools !== false,
+    promptSection: raw.promptSection === undefined ? DEFAULTS.promptSection : raw.promptSection !== false,
   };
 }
 

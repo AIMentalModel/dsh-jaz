@@ -98,7 +98,33 @@ node test-mock.mjs
 | 驱动一轮真实对话（DeepSeek） | ✅ 模型调用 `jaz`，cell 返回 42；`turn/end reason=completed` |
 | cell 内 `invoke`（论文核心原语） | ✅ 2 次并行 invoke 均 `completed`（42 / 19），trace 正常 |
 
-## 6. 已知边界（非缺陷）
+## 6. 全 profile 镜像下的 preset 复验（发现"本层注册"限制）
+
+把镜像 profile 的 bundle 列表调成与真实 GUI profile **完全一致**（`dsh-base` + `dsh-web-app` + `dsh-experimental-agent-team-profile` + `dsh-experimental-auto-review` + `@local/dsh-jaz-invoke` + `@local/dsh-jaz-mode` + `@local/prompt-manager` + `@local/dsh-jaz-preset`）后重测：
+
+| 阶段 | 该 JAZ 预设会话可见工具 | 结论 |
+|---|---|---|
+| 初版 preset | `jaz_mode, jaz_agent, jaz, spawn_teammate, send_message, list_agents, wait_agent, interrupt_agent, team_task_create/list/get/update`（12 个） | 全局注册的工具会漏进任何 preset |
+| preset 挂 restriction-only 的 mode 插件（`registerTools:false`） | `jaz, spawn_teammate, send_message, list_agents, wait_agent, interrupt_agent, team_task_*`（7 个） | `jaz_mode`/`jaz_agent` 已滤除 |
+| 同上 + 白名单不再保留 `jaz_mode` | 同上（7 个） | ✅ 当前发布状态 |
+
+**根因（DSH 注册表契约，不是本插件缺陷）**：`ToolRuntime.restrict` 只过滤**该 scope 继承**的工具（全局层 + 祖先层），**永不过滤本层注册**。实测证据：
+
+- 在带 agent-team 的会话里执行 `jaz_mode enter`（restriction 装进 agent 本层）→ `read/write/bash/glob/grep/web_search/job_*/skill/ask_user_question/...` 全部消失，但 `spawn_teammate/send_message/list_agents/wait_agent/interrupt_agent/team_task_*` 与 `subagent` **仍在** —— 这些是插件直接注册进 agent 本层的；
+- 子代理的 `toolFilter: { allow: ['jaz'] }` 同样滤不掉它们（实测 child 的 `ctx.tools.schemas` 仍含这些名字）。
+
+**尝试过的解法（不可行）**：给 preset 加 `isolate: { tools: true }` 让 preset 拥有自己的工具注册表 → 预设挂载直接失败：
+
+```
+RemoteError: jaz-invoke (@local/dsh-jaz-invoke): waiting for tools
+jaz-restrict (@local/dsh-jaz-mode): waiting for tools
+```
+
+被隔离的组内没有提供 `tools` 服务的插件，所以该组永远等不到依赖，会话创建失败。已回滚。
+
+**结论**：插件侧能做到的极限是"滤除继承层工具"；要得到**严格只有 `jaz` 一个工具**的会话，需要在这个 profile 里停用那些"按 agent 注入工具"的 bundle（如 `@deepseek-ai/dsh-experimental-agent-team-profile`，在 Plugin Manager 里关掉即可）。这不是 JAZ 插件能单方面决定的——它属于 profile 的组合选择。
+
+## 7. 已知边界（非缺陷）
 
 - REPL 会话状态驻留插件内存，重启即清空（论文的"记忆即状态"不引入外部存储）；
 - JAZ 模式下 agent 无法调用 `write`/`bash` 等 —— 这是论文"无外部系统"的刻意设定，需要时用 `allow` 放行；

@@ -46,6 +46,8 @@ dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-preset
 
 > preset 是**新会话**才生效的：已存在的会话保持它启动时的插件集（DSH 的规则），改动后请开新会话验证。装完新 bundle 后如果选择器里没看到 `JAZ`，刷新一次页面。
 
+> 诚实说明工具面：preset 自己只贡献 `jaz`，并以 `registerTools: false` 挂一个「只装 restriction」的 `@local/dsh-jaz-mode` 滤掉**继承层**工具（含 host 级 `jaz_mode`/`jaz_agent`）。但 DSH 注册表不过滤「本层注册」，所以 profile 里那些**按 agent 注入工具**的 bundle（如 `dsh-experimental-agent-team-profile` 的 `spawn_teammate`/`team_task_*`）仍会残留。要严格只有 `jaz`，在 Plugin Manager 里停用这类 bundle。实测：见 [docs/VERIFICATION.md](./docs/VERIFICATION.md) 第 6 节。
+
 ### 方式 B：让一个子代理跑 JAZ 模式（当前会话里按需用）
 
 ```

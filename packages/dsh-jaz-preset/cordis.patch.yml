@@ -56,3 +56,16 @@
                 Write compact code. Do not narrate; a cell either returns a value or it does not.
           - id: jaz-invoke
             name: '@local/dsh-jaz-invoke'
+          # Restriction-only mount of the mode plugin: it registers no tools of
+          # its own, and its JAZ-mode restriction filters everything this preset
+          # INHERITS — so globally registered tools (agent-team's
+          # spawn_teammate/send_message/team_task_*, the host-level
+          # jaz_mode/jaz_agent) stay out of this session. Only `jaz` remains
+          # visible, which is what the paper's minimal harness means.
+          - id: jaz-restrict
+            name: '@local/dsh-jaz-mode'
+            config:
+              mode: jaz
+              registerTools: false
+              promptSection: false
+              allowTools: []
