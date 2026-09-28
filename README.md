@@ -35,18 +35,20 @@ dsh plugin --profile web add ~/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-preset
 
 论文的 harness 只有一条 `invoke` 原语——没有工具列表、没有文件系统、没有记忆系统。本仓库提供三种入口，从"最省事"到"最细粒度"：
 
-### 方式 A：JAZ preset —— 新会话直接就是 JAZ 模式（最直观）
+### 方式 A：JAZ preset —— 新会话直接就是 JAZ 风格（两种口味）
 
-安装 `@local/dsh-jaz-preset` 后，**新建会话时在 preset 选择器里选 `JAZ`**。该 preset 只挂两样东西：
+安装 `@local/dsh-jaz-preset` 后，**新建会话时在 preset 选择器里二选一**：
 
-- `@deepseek-ai/dsh-persona`：JAZ 协议（写 cell、用 `invoke`、状态存变量、历史够长就尾递归委托）；
-- `@local/dsh-jaz-invoke`：`jaz` 工具本身。
+| preset | 内容 | 什么时候用 |
+|---|---|---|
+| **`JAZ`**（推荐） | JAZ 协议 persona + **随 DSH 一起发的 base 工具**（read/write/edit/glob/grep/bash/jobs/web_search/web_fetch/todo/skill/present/compaction/subagent/workflow）+ `jaz` | 日常使用：要 JAZ 风格（写 cell + `invoke` 递归委托），但**照常保留文件和网络工具**，什么都不拿走 |
+| **`JAZ (minimal)`** | 只有 `jaz`（用 restriction 把继承层工具全滤掉） | 复现论文的实验设定（prompt-only、无文件系统、无记忆系统） |
 
-所以这个会话里**没有** shell、文件系统、网络、委派、compaction 等工具——正是论文"prompt-only，无外部系统"的设定。会话状态（变量 / `__history__` / `__scope__`）由 `session` 持久在插件内存里。
+preset 的工具行是**从 shipped `standard` 预设原样复制的**（连必填 config 一起），所以不会因为漏配置而挂载失败；想加减工具就在 preset 的 `config.plugins` 里改。
 
-> preset 是**新会话**才生效的：已存在的会话保持它启动时的插件集（DSH 的规则），改动后请开新会话验证。装完新 bundle 后如果选择器里没看到 `JAZ`，刷新一次页面。
-
-> 诚实说明工具面：preset 自己只贡献 `jaz`，并以 `registerTools: false` 挂一个「只装 restriction」的 `@local/dsh-jaz-mode` 滤掉**继承层**工具（含 host 级 `jaz_mode`/`jaz_agent`）。但 DSH 注册表不过滤「本层注册」，所以 profile 里那些**按 agent 注入工具**的 bundle（如 `dsh-experimental-agent-team-profile` 的 `spawn_teammate`/`team_task_*`）仍会残留。要严格只有 `jaz`，在 Plugin Manager 里停用这类 bundle。实测：见 [docs/VERIFICATION.md](./docs/VERIFICATION.md) 第 6 节。
+> preset 是**新会话**才生效的：已存在的会话保持它启动时的插件集（DSH 的规则）。装完/改完新 bundle 后请开新会话验证；选择器里没看到就刷新一次页面。
+>
+> `JAZ (minimal)` 的诚实说明：restriction 通过 `@local/dsh-jaz-mode`（`registerTools: false`）挂载，能滤掉**继承层**工具（含 host 级 `jaz_mode`/`jaz_agent`），但 DSH 注册表**不过滤本层注册**——像 `dsh-experimental-agent-team-profile` 那样直接往每个 agent 注入工具的 bundle 仍会残留 `spawn_teammate`/`team_task_*`。实测见 [docs/VERIFICATION.md](./docs/VERIFICATION.md) §6。
 
 ### 方式 B：让一个子代理跑 JAZ 模式（当前会话里按需用）
 

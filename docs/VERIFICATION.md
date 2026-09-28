@@ -124,7 +124,34 @@ jaz-restrict (@local/dsh-jaz-mode): waiting for tools
 
 **结论**：插件侧能做到的极限是"滤除继承层工具"；要得到**严格只有 `jaz` 一个工具**的会话，需要在这个 profile 里停用那些"按 agent 注入工具"的 bundle（如 `@deepseek-ai/dsh-experimental-agent-team-profile`，在 Plugin Manager 里关掉即可）。这不是 JAZ 插件能单方面决定的——它属于 profile 的组合选择。
 
-## 7. 已知边界（非缺陷）
+## 7. 用户会话《寻找 dsh 工作区相关插件》行为分析（2026-09-28）
+
+**事实**（会话 `session-406cbc25`）：
+
+- 会话以 `standard` 启动，但第 4 个事件处用户切到了 `jaz` 预设（`agent-preset/selected`）；
+- 切换后该次请求的工具表（`request/header` 实测）＝ `jaz, jaz_agent, jaz_mode, spawn_teammate, send_message, list_agents, wait_agent, interrupt_agent, team_task_create/list/get/update` —— **没有** `read`/`glob`/`grep`/`bash`/`web_search`/`web_fetch`，系统提示已换为 JAZ 协议；
+- 模型因此 9 次全部调用 `jaz`，在 cell 里用 Node 抓 npm registry/文件系统；
+- 该轮以 `turn/end: {kind: "aborted", reason: {kind: "user"}}` 结束——**用户中断，未产出最终回答**。
+
+**结论**：模式按设计生效，模型没有行为异常；"长且只有 jaz" 是当时那版 preset 定义（只有 `jaz`）的直接后果——对"找插件/搜网络"这类任务，这是**错的模式**。
+
+**据此的重构**：
+
+| 之前 | 现在 |
+|---|---|
+| 一个 preset，只有 `jaz` | 两个：`JAZ`（JAZ 风格 + 全部 base 工具）与 `JAZ (minimal)`（论文设定） |
+| persona 不提能力边界 | `JAZ` 的 persona 明确分工：常规文件/终端/网络用专用工具，`jaz` 用于递归委托/长程状态；`JAZ (minimal)` 的 persona 说明"没有网络/文件工具，需要时请让用户切换 preset" |
+
+**新增实测**
+
+| 检查 | 结果 |
+|---|---|
+| 手写工具行（缺必填 config） | ❌ preset BROKEN：`agent-instructions.maxBytes` / `tool-fs-search.sampleOverCapGlobResults` / `tool-todo.allowParallelInProgress` missing → 会话创建致命失败。改为**从 shipped `standard` 预设原样复制工具行**后通过 |
+| `JAZ` 会话工具表 | ✅ `jaz + read write edit glob grep bash jobs web_search web_fetch skill todo ask_user_question present + subagent workflow + agent-team 工具` |
+| `JAZ (minimal)` 会话工具表 | ✅ `jaz`（+ agent-team 本层注入的 6 个，无法过滤） |
+| `JAZ` 会话真实搜网一轮 | ✅ 调用 `web_search` + `bash`/`curl`（npm registry），产出带版本/下载量/链接的 3 条结果，`turn/end: completed` |
+
+## 8. 已知边界（非缺陷）
 
 - REPL 会话状态驻留插件内存，重启即清空（论文的"记忆即状态"不引入外部存储）；
 - JAZ 模式下 agent 无法调用 `write`/`bash` 等 —— 这是论文"无外部系统"的刻意设定，需要时用 `allow` 放行；
