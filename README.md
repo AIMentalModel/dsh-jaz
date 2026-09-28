@@ -13,12 +13,15 @@
 ## 快速开始
 
 ```bash
-# 1) 两个 bundle 都装上（幂等；profile 级生效）
-plugin_manager install_bundle  target=<repo>/            # @local/dsh-jaz-invoke
-plugin_manager install_bundle  target=<repo>/packages/dsh-jaz-mode
+git clone https://github.com/AIMentalModel/dsh-jaz.git ~/Code/dsh-plugins/dsh-jaz
+
+# 两个 bundle 都装上（幂等；profile 级生效；target 需绝对路径）
+plugin_manager install_bundle  target=$HOME/Code/dsh-plugins/dsh-jaz
+plugin_manager install_bundle  target=$HOME/Code/dsh-plugins/dsh-jaz/packages/dsh-jaz-mode
 ```
 
 需要 `ctx.ptcRuntime`（`@deepseek-ai/dsh-ptc-runtime-node`）与 `ctx.subagents`（`dsh-subagent-spawn-in-process`），DSH 默认 profile 已具备。
+包名保留 `@local/` 前缀是刻意的：它们作为本机 profile bundle 安装，不发布到 npm。
 
 ## JAZ 模式（`@local/dsh-jaz-mode`）
 
